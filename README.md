@@ -35,6 +35,8 @@ Med denne integration kan brugere stille simple spørgsmål som:
 - **Tidsbesparende** - Eliminerer behovet for manuel datasøgning og -behandling
 - **Demokratiserer data** - Gør komplekse statistiske data tilgængelige for alle
 
+![Danmarks Statistik MCP Demo](images/comic.png)
+
 ## Installation
 
 ### Forudsætninger
