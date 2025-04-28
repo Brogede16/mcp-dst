@@ -167,10 +167,7 @@ def get_data(table_id: str, variables: list[dict] = None, format: DataFormat = "
 
         payload["variables"] = processed_variables
     else:
-         # Hvis variables er None eller tom liste, skal API'et have et "variables": []
-         # eller nøglen skal udelades. DST's API dokumentation siger at udelade nøglen
-         # fører til automatisk elimination, men [] er også et validt input.
-         # Lad os sende en tom liste, hvis variables var None eller tom.
+         # If variables is None or empty list, send an empty list in the payload
          payload["variables"] = []
 
 
@@ -183,9 +180,6 @@ def get_data(table_id: str, variables: list[dict] = None, format: DataFormat = "
     # Make the request
     try:
         if format_upper in ["BULK", "SDMXCOMPACT", "SDMXGENERIC"]:
-             # For streaming, you might want to return the raw response object or handle streaming differently
-             # depending on how FastMCP resources/tools are expected to return streaming data.
-             # For a simple HTTP endpoint, returning r.content is common for binary/large text.
              r = requests.post(url, json=payload, stream=True)
         else:
             r = requests.post(url, json=payload)
@@ -198,7 +192,7 @@ def get_data(table_id: str, variables: list[dict] = None, format: DataFormat = "
         elif format_upper in ["CSV", "PX", "TSV", "HTML5", "HTML5InclNotes"]:
             return r.text
         else:
-            return r.content # For XLSX, BULK, SDMX...
+            return r.content
 
     except requests.exceptions.HTTPError as e:
         logger.error(f"HTTP error occurred: {e.response.status_code} - {e}")
@@ -238,31 +232,35 @@ async def get_statistics(dataset: str) -> str:
     return f"Statistics for dataset {dataset} (Placeholder - Actual API call needed)"
 
 
-# --- Resource/Tool Definition med stibaserede URI'er ---
+# --- Resource/Tool Definition med Scheme-baserede URI'er (KRÆVET af FastMCP) ---
 
-@mcp.resource("/statbank/subjects")
+# Brug et scheme (statbank://) for at tilfredsstille Pydantic/FastMCP validering ved load.
+# FastMCP's sse_app skal så mappe stien (/statbank/...) til HTTP paths.
+
+@mcp.resource("statbank://statbank/subjects")
 def subjects_resource() -> dict:
     """Get all subjects from DST API"""
     return get_subjects() # Kalder den underliggende tool funktion
 
-@mcp.resource("/statbank/subjects/{subject_id}")
+@mcp.resource("statbank://statbank/subjects/{subject_id}")
 def subject_by_id_resource(subject_id: str) -> dict:
     """Get a specific subject from DST API"""
     return get_subjects(subjects=[subject_id]) # Kalder den underliggende tool funktion
 
-@mcp.resource("/statbank/tables")
+@mcp.resource("statbank://statbank/tables")
 def tables_resource() -> dict:
     """Get tables from DST API"""
     return get_tables() # Kalder den underliggende tool funktion
 
-@mcp.resource("/statbank/tableinfo/{table_id}")
+@mcp.resource("statbank://statbank/tableinfo/{table_id}")
 def tableinfo_resource(table_id: str) -> dict:
     """Get metadata for a specific table from DST API"""
     return get_table_info(table_id) # Kalder den underliggende tool funktion
 
-# --- ÆNDRING HER: Definer data_resource som et TOOL med standard POST-sti ---
-# @mcp.resource("/statbank/data/{table_id}/{variables}/{format}/{timeOrder}/{lang}/{valuePresentation}) # Fjernet/ændret
-@mcp.tool("/statbank/data/{table_id}") # Ændret til @mcp.tool og standard POST-sti
+# --- data_resource som et TOOL med Scheme-baseret URI og standard POST-sti ---
+# Vi beholder den som @mcp.tool og med path'en /statbank/data/{table_id}
+# og tilføjer scheme'et for at løse ValidationError.
+@mcp.tool("statbank://statbank/data/{table_id}")
 def data_resource(table_id: str, variables: list[dict] = None, format: DataFormat = "JSONSTAT",
                   timeOrder: Optional[Literal["Ascending", "Descending"]] = None,
                   lang: str = "da",
@@ -276,8 +274,7 @@ def data_resource(table_id: str, variables: list[dict] = None, format: DataForma
 
 
 # Resource/Tool definition for get_statistics hvis relevant
-# Typisk som et tool, da det potentielt laver et eksternt kald.
-# @mcp.tool("/statbank/statistics/{dataset}") # Eksempel på Tool med sti
+# @mcp.tool("statbank://statbank/statistics/{dataset}") # Eksempel på Tool med scheme-baseret sti
 # async def statistics_tool(dataset: str) -> str:
 #     """Get statistics for a specific dataset"""
 #     return await get_statistics(dataset) # Kalder den underliggende async funktion
