@@ -3,17 +3,18 @@ from mcp.server.fastmcp import FastMCP
 import sys
 import logging
 import requests
-import os
+# Fjern import os - ikke nødvendigt da porten håndteres af uvicorn
 
-# Set up logging
+# Set up logging (dette håndterer logningsniveauet for hele applikationen)
 logging.basicConfig(
-    level=logging.DEBUG,
+    level=logging.DEBUG, # DEBUG niveau vil logge alle DEBUG, INFO, WARNING, ERROR, CRITICAL beskeder
     format='%(asctime)s - %(levelname)s - %(message)s',
-    stream=sys.stderr
+    stream=sys.stderr # Logger til standard fejl-output, som Render opsamler
 )
-logger = logging.getLogger(__name__)
+logger = logging.getLogger(__name__) # Logger for dette modul
 
 # Initialize FastMCP server
+# Din applikationsinstans, som Uvicorn skal køre
 mcp = FastMCP("Danmarks Statistik API")
 
 # Base URL for DST API
@@ -196,10 +197,7 @@ def get_data(table_id: str, variables: list[dict] = None, format: DataFormat = "
         except requests.exceptions.JSONDecodeError:
             logger.error("Could not decode error response as JSON.")
             raise ValueError(f"API request failed with status {r.status_code} and could not parse error details.") from e
-        except Exception as parse_e:
-             logger.error(f"An unexpected error occurred while processing API error response: {parse_e}")
-             raise ValueError(f"API request failed with status {r.status_code} and an unexpected error occurred during error processing.") from parse_e
-    except requests.exceptions.RequestException as e:
+        except requests.exceptions.RequestException as e:
         logger.error(f"Request Exception occurred: {e}")
         raise ValueError(f"API request failed due to network or other request error: {e}") from e
     except Exception as e:
@@ -266,21 +264,18 @@ async def get_statistics(dataset: str) -> str:
     # Brug httpx til asynkrone http kald hvis nødvendigt her
     return f"Statistics for dataset {dataset} (Async Placeholder)"
 
-
-# Hovedblokken til at starte serveren
-if __name__ == "__main__":
-    try:
-        logger.info("Starting Danmarks Statistik API Server...")
-        # Læs den dynamiske PORT miljøvariabel sat af Render.
-        # Vi beholder denne linje, da den er god praksis,
-        # selvom mcp.run måske ikke bruger 'port' argumentet direkte.
-        render_port = int(os.environ.get("PORT", 8000))
-        logger.info(f"Server will attempt to use port settings (via FastMCP API): {render_port}")
-
-        # Kald mcp.run uden 'host' og 'port' argumenterne, da de forårsagede TypeErrors.
-        # FastMCP skal på egen hånd håndtere binding til korrekt adresse/port.
-        mcp.run(transport='sse', log_level='debug')
-
-    except Exception as e:
-        logger.error(f"An error occurred during server startup: {e}")
-        sys.exit(1)
+# FJERN HELE DENNE BLOK, da serveren startes af Uvicorn på Render i stedet for mcp.run()
+# if __name__ == "__main__":
+#     try:
+#         logger.info("Starting Danmarks Statistik API Server...")
+#         # Læs den dynamiske PORT miljøvariabel sat af Render.
+#         render_port = int(os.environ.get("PORT", 8000))
+#         logger.info(f"Render assigned port: {render_port}. FastMCP will need to bind correctly.")
+#
+#         # Kald mcp.run uden 'host', 'port' og 'log_level'.
+#         # Dette er kun til STDIO transport ifølge dokumentationen, ikke netværksserver.
+#         mcp.run(transport='sse') # Denne linje skal fjernes ved deployering på Render
+#
+#     except Exception as e:
+#         logger.error(f"An error occurred during server startup: {e}")
+#         sys.exit(1)
