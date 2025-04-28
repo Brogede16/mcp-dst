@@ -1,30 +1,3 @@
-"""
-MCP Server for Danmarks Statistik's Statistikbank API.
-
-Dette script starter en MCP-server, der eksponerer Danmarks Statistiks API-endpoints (SUBJECTS, TABLES, TABLEINFO, DATA)
-som ressourcer. 
-
-Forudsætninger:
-- Python 3.9+ (krævet af mcp biblioteket).
-- Biblioteker: `mcp` og `requests` (installer med `pip install mcp requests`).
-
-Kørsel:
-- Kør denne fil direkte med `python mcp_server.py` for at starte serveren.
-- Alternativt, under udvikling: `mcp dev mcp_server.py` (hvis mcp CLI er installeret), hvilket også sikrer afhængigheder.
-
-Brug:
-- Forbind en MCP-klient (f.eks. en LLM der understøtter MCP eller MCP Inspector) til denne server.
-- Anvend resource-URI'erne defineret nedenfor (statbank://...) for at kalde de ønskede funktioner.
-- F.eks. kan man anmode om "statbank://subjects" for at få top-niveau emner, 
-  eller "statbank://subjects/02" for at få underemner under emne "02".
-- Se dokumentationen i koden for parametre til de enkelte endpoints.
-
-Noter:
-- Serveren fungerer som en proxy til Danmarks Statistiks REST API. Den modtager forespørgsler via MCP-protokollen, 
-  kalder DST API'et vha. HTTP, og returnerer svaret (typisk i JSON format).
-- Koden er struktureret, så det er nemt at tilføje flere endpoints eller tilpasse funktionalitet (f.eks. fejlhaandtering, caching, etc.).
-"""
-
 from typing import Any, Literal, Optional, Union, Dict
 from mcp.server.fastmcp import FastMCP
 import sys
@@ -271,7 +244,7 @@ if REQUESTS_AVAILABLE:
 if __name__ == "__main__":
     try:
         logger.info("Starting Danmarks Statistik API Server...")
-        mcp.run(transport='stdio')
-    except Exception as e:
-        logger.critical(f"Fatal error: {e}", exc_info=True)
-        sys.exit(1)
+        mcp.run(transport='sse', host='0.0.0.0', port=8000, log_level='debug')
+    except
+::contentReference[oaicite:0]{index=0}
+ 
