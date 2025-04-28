@@ -161,11 +161,18 @@ def get_data(table_id: str, variables: list[dict] = None, format: DataFormat = "
             if not isinstance(values, list):
                  processed_values = [values]
             else:
-                 processed_variables = values # Use original list if it's already a list
+                 processed_variables = values
 
-            processed_variables.append({"code": var["code"], "values": processed_values})
+            processed_variables.append({"code": var["code"], "values": processed_variables})
 
         payload["variables"] = processed_variables
+    else:
+         # Hvis variables er None eller tom liste, skal API'et have et "variables": []
+         # eller nøglen skal udelades. DST's API dokumentation siger at udelade nøglen
+         # fører til automatisk elimination, men [] er også et validt input.
+         # Lad os sende en tom liste, hvis variables var None eller tom.
+         payload["variables"] = []
+
 
     # Add optional parameters if provided
     if timeOrder:
@@ -231,44 +238,39 @@ async def get_statistics(dataset: str) -> str:
     return f"Statistics for dataset {dataset} (Placeholder - Actual API call needed)"
 
 
-# --- Resource Definition med stibaserede URI'er ---
+# --- Resource/Tool Definition med stibaserede URI'er ---
 
 @mcp.resource("/statbank/subjects")
 def subjects_resource() -> dict:
     """Get all subjects from DST API"""
-    return get_subjects()
+    return get_subjects() # Kalder den underliggende tool funktion
 
 @mcp.resource("/statbank/subjects/{subject_id}")
 def subject_by_id_resource(subject_id: str) -> dict:
     """Get a specific subject from DST API"""
-    return get_subjects(subjects=[subject_id])
+    return get_subjects(subjects=[subject_id]) # Kalder den underliggende tool funktion
 
 @mcp.resource("/statbank/tables")
 def tables_resource() -> dict:
     """Get tables from DST API"""
-    return get_tables()
+    return get_tables() # Kalder den underliggende tool funktion
 
 @mcp.resource("/statbank/tableinfo/{table_id}")
 def tableinfo_resource(table_id: str) -> dict:
     """Get metadata for a specific table from DST API"""
-    return get_table_info(table_id)
+    return get_table_info(table_id) # Kalder den underliggende tool funktion
 
-# OBS! Denne resource definition med komplekse parametre i URL-stien er IKKE standard for HTTP.
-# For nem integration med standard HTTP/OpenAI, bør du overveje at ændre denne
-# til en POST-anmodning til f.eks. "/statbank/data/{table_id}" og sende
-# 'variables', 'format', osv. i request body og/eller query parametre.
-# Koden her bruger den definition du havde, men OpenAPI specifikationen vil
-# beskrive det som en standard POST for kompatibilitet.
-@mcp.resource("/statbank/data/{table_id}/{variables}/{format}/{timeOrder}/{lang}/{valuePresentation}")
+# --- ÆNDRING HER: Definer data_resource som et TOOL med standard POST-sti ---
+# @mcp.resource("/statbank/data/{table_id}/{variables}/{format}/{timeOrder}/{lang}/{valuePresentation}) # Fjernet/ændret
+@mcp.tool("/statbank/data/{table_id}") # Ændret til @mcp.tool og standard POST-sti
 def data_resource(table_id: str, variables: list[dict] = None, format: DataFormat = "JSONSTAT",
                   timeOrder: Optional[Literal["Ascending", "Descending"]] = None,
                   lang: str = "da",
                   valuePresentation: Optional[Literal["Code", "Text"]] = None) -> Union[dict, bytes, str]:
     """Get data from a specific table from DST API"""
-    # Som nævnt, usandsynligt at 'variables' og andre komplekse/enum parametre
-    # parses korrekt fra URL-stien af et standard HTTP framework/Uvicorn.
-    # Den underliggende get_data funktion er dog intakt.
-    logger.warning("Data resource called. Parameter parsing from non-standard URL path might not work as expected via HTTP.")
+    # Funktionen forbliver den samme, den modtager argumenterne fra HTTP requesten
+    # via FastMCP/Uvicorn routing, som nu sker korrekt for POST til denne sti.
+    logger.info(f"Data resource tool called for table {table_id}. Format: {format}, Variables: {variables}")
     return get_data(table_id=table_id, variables=variables, format=format,
                     timeOrder=timeOrder, lang=lang, valuePresentation=valuePresentation)
 
