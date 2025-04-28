@@ -1,0 +1,280 @@
+openapi: 3.1.0
+info:
+  title: Danmarks Statistik API
+  description: API for accessing data from Danmarks Statistik. Exposes resources and tools via Model Context Protocol SSE transport, consumable as standard HTTP endpoints.
+  version: 1.0.0
+
+servers:
+  - url: https://mcp-dst.onrender.com # ERSTAT MED DIN FAKTUELLE RENDER URL, hvis den ændrer sig
+    description: Render Deployment of Danmarks Statistik MCP Server
+
+paths:
+  /statbank/subjects:
+    get:
+      summary: Get subjects from DST API
+      operationId: getSubjects
+      parameters:
+        - name: subjects
+          in: query
+          description: Optional list of subject codes. If provided, fetches sub-subjects for these subjects.
+          required: false
+          schema:
+            type: array
+            items:
+              type: string
+        - name: includeTables
+          in: query
+          description: If True, includes tables in the result under each subject.
+          required: false
+          schema:
+            type: boolean
+        - name: recursive
+          in: query
+          description: If True, fetches sub-subjects (and tables) recursively through all levels.
+          required: false
+          schema:
+            type: boolean
+        - name: omitInactiveSubjects
+          in: query
+          description: If True, omits subjects/sub-subjects that are no longer updated.
+          required: false
+          schema:
+            type: boolean
+        - name: lang
+          in: query
+          description: Language code for response metadata ("da" or "en", default "da").
+          required: false
+          schema:
+            type: string
+            default: "da"
+            enum: ["da", "en"]
+      responses:
+        '200':
+          description: Successfully retrieved subjects hierarchy
+          content:
+            application/json:
+              schema:
+                type: object
+                description: JSON object containing the subjects hierarchy from DST API.
+                properties: {} # Korrigeret for ChatGPT validation
+
+  /statbank/subjects/{subject_id}:
+    get:
+      summary: Get a specific subject by ID from DST API
+      operationId: getSubjectById
+      parameters:
+        - name: subject_id
+          in: path
+          description: The subject code (e.g., "02").
+          required: true
+          schema:
+            type: string
+        - name: lang
+          in: query
+          description: Language code for response metadata ("da" or "en", default "da").
+          required: false
+          schema:
+            type: string
+            default: "da"
+            enum: ["da", "en"]
+      responses:
+        '200':
+          description: Successfully retrieved subject details
+          content:
+            application/json:
+              schema:
+                type: object
+                description: JSON object containing details for the specific subject.
+                properties: {} # Korrigeret for ChatGPT validation
+
+  /statbank/tables:
+    get:
+      summary: Get list of tables from DST API
+      operationId: getTables
+      parameters:
+        - name: subjects
+          in: query
+          description: Optional list of subject codes to filter tables on.
+          required: false
+          schema:
+            type: array
+            items:
+              type: string
+        - name: pastdays
+          in: query
+          description: Optional number of days; only tables updated within these days are included.
+          required: false
+          schema:
+            type: integer
+            format: int32
+            minimum: 0
+        - name: includeInactive
+          in: query
+          description: If True, includes inactive (discontinued) tables.
+          required: false
+          schema:
+            type: boolean
+        - name: lang
+          in: query
+          description: Language code for response metadata ("da" or "en", default "da").
+          required: false
+          schema:
+            type: string
+            default: "da"
+            enum: ["da", "en"]
+      responses:
+        '200':
+          description: Successfully retrieved list of tables
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties: {} # Korrigeret for ChatGPT validation for array items
+                description: JSON array containing the list of tables from DST API.
+
+  /statbank/tableinfo/{table_id}:
+    get:
+      summary: Get metadata for a specific table from DST API
+      operationId: getTableInfo
+      parameters:
+        - name: table_id
+          in: path
+          description: The table code (e.g., "folk1c").
+          required: true
+          schema:
+            type: string
+        - name: lang
+          in: query
+          description: Language code for response metadata ("da" or "en", default "da").
+          required: false
+          schema:
+            type: string
+            default: "da"
+            enum: ["da", "en"]
+      responses:
+        '200':
+          description: Successfully retrieved table metadata
+          content:
+            application/json:
+              schema:
+                type: object
+                description: JSON object containing metadata (variables, value codes, etc.) for the table.
+                properties: {} # Korrigeret for ChatGPT validation
+
+  /statbank/data/{table_id}:
+    post:
+      summary: Retrieve data from a specific table from Danmarks Statistik.
+      operationId: getData
+      parameters:
+        - name: table_id
+          in: path
+          description: The table code (e.g., "folk1c").
+          required: true
+          schema:
+            type: string
+        - name: format
+          in: query
+          description: Output format. Default "JSONSTAT". Use JSONSTAT or JSON for structured data. CSV, XLSX, BULK, PX, TSV, HTML5, HTML5InclNotes for other formats.
+          required: false
+          schema:
+            type: string
+            default: "JSONSTAT"
+            enum: ["JSONSTAT", "JSON", "CSV", "XLSX", "BULK", "PX", "TSV", "HTML5", "HTML5InclNotes", "SDMXCOMPACT", "SDMXGENERIC"]
+        - name: timeOrder
+          in: query
+          description: Optional string for sorting time series ("Ascending" or "Descending").
+          required: false
+          schema:
+            type: string
+            enum: ["Ascending", "Descending"]
+        - name: lang
+          in: query
+          description: Language code for metadata in result ("da" or "en", default "da").
+          required: false
+          schema:
+            type: string
+            default: "da"
+            enum: ["da", "en"]
+        - name: valuePresentation
+          in: query
+          description: Optional string to control value presentation ("Code" or "Text").
+          required: false
+          schema:
+            type: string
+            enum: ["Code", "Text"]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                variables:
+                  type: array
+                  description: List of dictionaries to filter data. Each dict must have "code" (variable code) and "values" (list of desired value codes).
+                  items:
+                    type: object
+                    properties:
+                      code:
+                        type: string
+                        description: The variable code (e.g., "INDREG").
+                      values:
+                        type: array
+                        description: List of desired value codes for the variable (e.g., ["*"] for all, ["1", "2"]).
+                        items:
+                          oneOf:
+                            - type: string
+                            - type: integer
+                    required:
+                      - code
+                      - values
+              description: Filtering criteria for the data retrieval.
+      responses:
+        '200':
+          description: Successfully retrieved data in the requested format.
+          content:
+            application/json:
+              schema:
+                type: object
+                description: Data as JSON or JSONSTAT object.
+                properties: {} # Korrigeret for ChatGPT validation
+            text/csv:
+              schema:
+                type: string
+                description: Data as CSV text.
+            application/vnd.openxmlformats-officedocument.spreadsheetml.sheet:
+              schema:
+                type: string
+                format: binary
+                description: Data as an XLSX file.
+        '400':
+          description: Invalid request parameters or malformed request body.
+        '500':
+          description: Internal server error or error calling DST API.
+
+
+  /statbank/statistics/{dataset}: # Antaget POST som tidligere
+    post:
+      summary: Get statistics for a specific dataset from DST API.
+      operationId: getStatistics
+      parameters:
+        - name: dataset
+          in: path
+          description: The ID of the dataset to query (e.g., "BEV20").
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Successfully retrieved statistics.
+          content:
+            text/plain:
+              schema:
+                type: string
+                description: The requested statistics.
+        '400':
+          description: Invalid dataset ID or request parameters.
+        '500':
+          description: Internal server error or error calling DST API.
