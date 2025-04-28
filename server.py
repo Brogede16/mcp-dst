@@ -245,6 +245,6 @@ if __name__ == "__main__":
     try:
         logger.info("Starting Danmarks Statistik API Server...")
         mcp.run(transport='sse', host='0.0.0.0', port=8000, log_level='debug')
-    except
+    except:
 ::contentReference[oaicite:0]{index=0}
  
