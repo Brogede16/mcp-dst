@@ -1,4 +1,4 @@
-mcp[cli]
-requests
-pydantic
-httpx 
+fastapi>=0.100.0
+uvicorn>=0.22.0
+mcp>=0.2.5
+requests>=2.31.0
