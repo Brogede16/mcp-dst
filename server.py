@@ -1,9 +1,9 @@
-from typing import Any, Literal, Optional, Union, Dict, get_args
+from typing import Any, Literal, Optional, Union, Dict, get_args # get_args er nødvendig for Literal validation
 from mcp.server.fastmcp import FastMCP
 import sys
 import logging
 import requests
-# Fjern import os - ikke nødvendigt da porten håndteres af uvicorn
+# import os # Ikke nødvendigt at importere os her, da porten håndteres af uvicorn via $PORT i startkommandoen
 
 # Set up logging (dette håndterer logningsniveauet for hele applikationen)
 logging.basicConfig(
@@ -15,14 +15,14 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # Initialize FastMCP server
-# Din applikationsinstans, som Uvicorn skal køre
+# Dette 'mcp' objekt er din applikationsinstans.
+# Uvicorn vil køre den ved at kalde dens .sse_app() metode.
 mcp = FastMCP("Danmarks Statistik API")
 
 # Base URL for DST API
 BASE_URL = "https://api.statbank.dk/v1"
 
 # Define valid formats as a literal type
-# Tilføjet SDMXCOMPACT og SDMXGENERIC, der bruges i get_data
 DataFormat = Literal["JSONSTAT", "JSON", "CSV", "XLSX", "BULK", "PX", "TSV", "HTML5", "HTML5InclNotes", "SDMXCOMPACT", "SDMXGENERIC"]
 
 # Add tools for direct API access
@@ -205,9 +205,9 @@ def get_data(table_id: str, variables: list[dict] = None, format: DataFormat = "
              logger.error(f"An unexpected error occurred while processing API error response: {parse_e}")
              raise ValueError(f"API request failed with status {r.status_code} and an unexpected error occurred during error processing.") from parse_e
     except requests.exceptions.RequestException as e:
-        # <--- Indrykningen her er nu rettet i denne version
-        logger.error(f"Request Exception occurred: {e}") # Denne linje er indrykket korrekt
-        raise ValueError(f"API request failed due to network or other request error: {e}") from e # Denne linje er indrykket korrekt
+        # Korrekt indrykket RequestException håndtering
+        logger.error(f"Request Exception occurred: {e}")
+        raise ValueError(f"API request failed due to network or other request error: {e}") from e
     except Exception as e:
         # Fang alle andre uventede fejl under datahentning
         logger.error(f"An unexpected error occurred while fetching data: {e}")
@@ -270,10 +270,15 @@ async def get_statistics(dataset: str) -> str:
         dataset: The ID of the dataset to query
     """
     logger.debug(f"Fetching statistics for dataset: {dataset}")
-    # Brug httpx til asynkrone http kald hvis nødvendigt her
+    # Hvis du skal lave HTTP kald her, brug en asynkron klient som httpx:
+    # import httpx
+    # async with httpx.AsyncClient() as client:
+    #     response = await client.get(f"{BASE_URL}/some_async_endpoint/{dataset}")
+    #     response.raise_for_status()
+    #     return response.text # Eller response.json()
     return f"Statistics for dataset {dataset} (Async Placeholder)"
 
-# HELE DENNE BLOK ER FJERNET, da serveren startes af Uvicorn på Render i stedet for mcp.run()
+# DENNE BLOK ER FJERNET, da serveren startes af Uvicorn på Render ved hjælp af Start Command
 # if __name__ == "__main__":
 #     try:
 #         logger.info("Starting Danmarks Statistik API Server...")
