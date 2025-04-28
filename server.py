@@ -1,11 +1,12 @@
 from typing import Any, Literal, Optional, Union, Dict, get_args
 from fastapi import FastAPI, Body
+from pydantic import BaseModel
 from mcp.server.fastmcp import FastMCP
 import sys
 import logging
 import requests
 
-# Set up logging
+# --- Setup Logging ---
 logging.basicConfig(
     level=logging.DEBUG,
     format='%(asctime)s - %(levelname)s - %(message)s',
@@ -13,24 +14,19 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Initialize FastAPI app and FastMCP server
+# --- Initialize Servers ---
 app = FastAPI()
 mcp = FastMCP("Danmarks Statistik API")
+app.mount("/sse", mcp.sse_app())  # Bind MCP server til /sse
 
-# Mount MCP's SSE app under /sse
-app.mount("/sse", mcp.sse_app())
-
-# Base URL for DST API
+# --- Constants ---
 BASE_URL = "https://api.statbank.dk/v1"
-
-# Define valid formats
 DataFormat = Literal[
     "JSONSTAT", "JSON", "CSV", "XLSX", "BULK", "PX", "TSV",
     "HTML5", "HTML5InclNotes", "SDMXCOMPACT", "SDMXGENERIC"
 ]
 
-# --- Funktioner (fælles til tools og REST endpoints) ---
-
+# --- Helper Functions (kald til DST API) ---
 def get_subjects(subjects: list[str] = None, includeTables: bool = False, recursive: bool = False,
                  omitInactiveSubjects: bool = False, lang: str = "da") -> dict:
     url = f"{BASE_URL}/subjects"
@@ -43,7 +39,6 @@ def get_subjects(subjects: list[str] = None, includeTables: bool = False, recurs
         payload["recursive"] = True
     if omitInactiveSubjects:
         payload["omitInactiveSubjects"] = True
-
     r = requests.post(url, json=payload)
     r.raise_for_status()
     return r.json()
@@ -57,7 +52,6 @@ def get_tables(subjects: list[str] = None, pastdays: int = None, includeInactive
         payload["pastdays"] = pastdays
     if includeInactive:
         payload["includeInactive"] = True
-
     r = requests.post(url, json=payload)
     r.raise_for_status()
     return r.json()
@@ -65,7 +59,6 @@ def get_tables(subjects: list[str] = None, pastdays: int = None, includeInactive
 def get_table_info(table_id: str, lang: str = "da") -> dict:
     url = f"{BASE_URL}/tableinfo"
     payload = {"table": table_id, "format": "JSON", "lang": lang}
-
     r = requests.post(url, json=payload)
     r.raise_for_status()
     return r.json()
@@ -79,22 +72,18 @@ def get_data(table_id: str, variables: list[dict] = None, format: DataFormat = "
     format_upper = format.upper()
     if format_upper not in valid_formats:
         raise ValueError(f"Invalid format: {format}. Valid formats are: {', '.join(valid_formats)}")
-
     payload = {
         "table": table_id,
         "format": format_upper,
         "lang": lang,
         "variables": variables or []
     }
-
     if timeOrder:
         payload["timeOrder"] = timeOrder
     if valuePresentation:
         payload["valuePresentation"] = valuePresentation
-
     r = requests.post(url, json=payload, stream=(format_upper in ["BULK", "SDMXCOMPACT", "SDMXGENERIC"]))
     r.raise_for_status()
-
     if format_upper in ["JSON", "JSONSTAT"]:
         return r.json()
     elif format_upper in ["CSV", "PX", "TSV", "HTML5", "HTML5InclNotes"]:
@@ -102,8 +91,15 @@ def get_data(table_id: str, variables: list[dict] = None, format: DataFormat = "
     else:
         return r.content
 
-# --- REST API Endpoints (til ChatGPT Actions) ---
+# --- Pydantic model til korrekt parsing af body for data ---
+class DataRequest(BaseModel):
+    variables: Optional[list[dict]] = None
+    format: DataFormat = "JSONSTAT"
+    timeOrder: Optional[str] = None
+    lang: str = "da"
+    valuePresentation: Optional[str] = None
 
+# --- REST API Endpoints (til ChatGPT Actions) ---
 @app.post("/statbank/subjects")
 def subjects_rest(includeTables: bool = False, recursive: bool = False,
                   omitInactiveSubjects: bool = False, lang: str = "da"):
@@ -125,18 +121,17 @@ def tableinfo_rest(table_id: str, lang: str = "da"):
     return get_table_info(table_id=table_id, lang=lang)
 
 @app.post("/statbank/data/{table_id}")
-def data_rest(table_id: str,
-              variables: list[dict] = Body(default=[]),
-              format: DataFormat = "JSONSTAT",
-              timeOrder: Optional[str] = None,
-              lang: str = "da",
-              valuePresentation: Optional[str] = None):
-    return get_data(table_id=table_id, variables=variables,
-                    format=format, timeOrder=timeOrder,
-                    lang=lang, valuePresentation=valuePresentation)
+def data_rest(table_id: str, body: DataRequest):
+    return get_data(
+        table_id=table_id,
+        variables=body.variables,
+        format=body.format,
+        timeOrder=body.timeOrder,
+        lang=body.lang,
+        valuePresentation=body.valuePresentation
+    )
 
-# --- MCP Tools (valgfrit, hvis du vil have dem aktivt i MCP-verdenen også) ---
-
+# --- MCP Tools (valgfrit) ---
 @mcp.tool()
 def get_subjects_tool(**kwargs):
     return get_subjects(**kwargs)
@@ -152,4 +147,3 @@ def get_table_info_tool(**kwargs):
 @mcp.tool()
 def get_data_tool(**kwargs):
     return get_data(**kwargs)
-
