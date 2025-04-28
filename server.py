@@ -1,31 +1,29 @@
-from typing import Any, Literal, Optional, Union, Dict, get_args # get_args er nødvendig for Literal validation
+from typing import Any, Literal, Optional, Union, Dict, get_args
 from mcp.server.fastmcp import FastMCP
 import sys
 import logging
 import requests
-# import os # Ikke nødvendigt at importere os her, da porten håndteres af uvicorn via $PORT i startkommandoen
+# import os # Ikke nødvendigt at importere os her
 
-# Set up logging (dette håndterer logningsniveauet for hele applikationen)
+# Set up logging
 logging.basicConfig(
-    level=logging.DEBUG, # DEBUG niveau vil logge alle DEBUG, INFO, WARNING, ERROR, CRITICAL beskeder
+    level=logging.DEBUG,
     format='%(asctime)s - %(levelname)s - %(message)s',
-    stream=sys.stderr # Logger til standard fejl-output, som Render opsamler
+    stream=sys.stderr
 )
-# Brug __name__ for at få en logger specifikt for dette modul
 logger = logging.getLogger(__name__)
 
-# Initialize FastMCP server
-# Dette 'mcp' objekt er din applikationsinstans.
-# Uvicorn vil køre den ved at kalde dens .sse_app() metode.
+# Initialize FastMCP server - This instance is the ASGI app callable via .sse_app()
 mcp = FastMCP("Danmarks Statistik API")
 
 # Base URL for DST API
-BASE_URL = "https://api.statbank.dk/v1"
+BASE_URL = "https://api.statbank.dk/v1" # Korrekt URL
 
 # Define valid formats as a literal type
 DataFormat = Literal["JSONSTAT", "JSON", "CSV", "XLSX", "BULK", "PX", "TSV", "HTML5", "HTML5InclNotes", "SDMXCOMPACT", "SDMXGENERIC"]
 
-# Add tools for direct API access
+# --- Tool Funktioner (Inkluderet som ønsket) ---
+
 @mcp.tool()
 def get_subjects(subjects: list[str] = None, includeTables: bool = False, recursive: bool = False,
                  omitInactiveSubjects: bool = False, lang: str = "da") -> dict:
@@ -57,7 +55,6 @@ def get_subjects(subjects: list[str] = None, includeTables: bool = False, recurs
         r.raise_for_status()
         return r.json()
     except requests.exceptions.RequestException as e:
-        # Log fejlen og re-raise for at Tool/Resource kaldet kan håndtere den
         logger.error(f"Request error in get_subjects: {e}")
         raise
 
@@ -164,7 +161,7 @@ def get_data(table_id: str, variables: list[dict] = None, format: DataFormat = "
             if not isinstance(values, list):
                  processed_values = [values]
             else:
-                 processed_values = values
+                 processed_variables = values # Use original list if it's already a list
 
             processed_variables.append({"code": var["code"], "values": processed_values})
 
@@ -179,18 +176,22 @@ def get_data(table_id: str, variables: list[dict] = None, format: DataFormat = "
     # Make the request
     try:
         if format_upper in ["BULK", "SDMXCOMPACT", "SDMXGENERIC"]:
+             # For streaming, you might want to return the raw response object or handle streaming differently
+             # depending on how FastMCP resources/tools are expected to return streaming data.
+             # For a simple HTTP endpoint, returning r.content is common for binary/large text.
              r = requests.post(url, json=payload, stream=True)
         else:
             r = requests.post(url, json=payload)
 
         r.raise_for_status()
 
+        # Handle different response formats
         if format_upper in ["JSON", "JSONSTAT"]:
             return r.json()
         elif format_upper in ["CSV", "PX", "TSV", "HTML5", "HTML5InclNotes"]:
             return r.text
         else:
-            return r.content
+            return r.content # For XLSX, BULK, SDMX...
 
     except requests.exceptions.HTTPError as e:
         logger.error(f"HTTP error occurred: {e.response.status_code} - {e}")
@@ -205,91 +206,82 @@ def get_data(table_id: str, variables: list[dict] = None, format: DataFormat = "
              logger.error(f"An unexpected error occurred while processing API error response: {parse_e}")
              raise ValueError(f"API request failed with status {r.status_code} and an unexpected error occurred during error processing.") from parse_e
     except requests.exceptions.RequestException as e:
-        # Korrekt indrykket RequestException håndtering
         logger.error(f"Request Exception occurred: {e}")
         raise ValueError(f"API request failed due to network or other request error: {e}") from e
     except Exception as e:
-        # Fang alle andre uventede fejl under datahentning
         logger.error(f"An unexpected error occurred while fetching data: {e}")
         raise
 
 
-# Add resources for RESTful access
-@mcp.resource("statbank://subjects")
-def subjects_resource() -> dict:
-    """Get all subjects"""
-    return get_subjects()
-
-@mcp.resource("statbank://subjects/{subject_id}")
-def subject_by_id_resource(subject_id: str) -> dict:
-    """Get a specific subject"""
-    return get_subjects(subjects=[subject_id])
-
-@mcp.resource("statbank://tables")
-def tables_resource() -> dict:
-    """Get all tables"""
-    return get_tables()
-
-@mcp.resource("statbank://tableinfo/{table_id}")
-def tableinfo_resource(table_id: str) -> dict:
-    """Get info for a specific table"""
-    return get_table_info(table_id)
-
-# Denne resource definition er potentiel problematisk for 'variables' argumentet i URL'en.
-# Vær opmærksom på dette, hvis du bruger denne resource.
-@mcp.resource("statbank://data/{table_id}/{variables}/{format}/{timeOrder}/{lang}/{valuePresentation}")
-def data_resource(table_id: str, variables: list[dict] = None, format: DataFormat = "JSONSTAT",
-                  timeOrder: Optional[Literal["Ascending", "Descending"]] = None,
-                  lang: str = "da",
-                  valuePresentation: Optional[Literal["Code", "Text"]] = None) -> Union[dict, bytes, str]:
-    """Get data from a specific table (Note: Sending 'variables' via URL path might require specific FastMCP support)
-
-    Args:
-        table_id: The table code (e.g., "folk1c").
-        variables: Optional list of dicts to filter data. Expected from URL path (might need parsing).
-        format: Output format. Default "JSONSTAT".
-        timeOrder: Optional string for sorting time series ("Ascending" or "Descending").
-        lang: Language code for metadata in result ("da" or "en", default "da").
-        valuePresentation: Optional string to control value presentation ("Code" or "Text").
-
-    Returns:
-        Data in the requested format. For JSON formats returns a dict, for other formats returns raw bytes or text.
-    """
-    logger.warning("Calling data_resource - ensure 'variables' is correctly parsed from URL path if complex.")
-    # Hvis FastMCP ikke automatisk parser 'variables' korrekt fra URL'en til list[dict],
-    # skal du tilføje den parsing logik her før kald til get_data.
-    return get_data(table_id=table_id, variables=variables, format=format,
-                    timeOrder=timeOrder, lang=lang, valuePresentation=valuePresentation)
-
-
 @mcp.tool()
 async def get_statistics(dataset: str) -> str:
-    """Get statistics from Danmarks Statistik.
+    """Get statistics for a specific dataset from Danmarks Statistik.
 
     Args:
         dataset: The ID of the dataset to query
     """
     logger.debug(f"Fetching statistics for dataset: {dataset}")
-    # Hvis du skal lave HTTP kald her, brug en asynkron klient som httpx:
+    # Example using httpx for async HTTP calls (requires httpx installed)
     # import httpx
     # async with httpx.AsyncClient() as client:
-    #     response = await client.get(f"{BASE_URL}/some_async_endpoint/{dataset}")
+    #     response = await client.get(f"{BASE_URL}/some_async_endpoint/{dataset}") # Replace with actual endpoint
     #     response.raise_for_status()
-    #     return response.text # Eller response.json()
-    return f"Statistics for dataset {dataset} (Async Placeholder)"
+    #     return response.text
+    # Currently returns a placeholder string
+    return f"Statistics for dataset {dataset} (Placeholder - Actual API call needed)"
 
-# DENNE BLOK ER FJERNET, da serveren startes af Uvicorn på Render ved hjælp af Start Command
+
+# --- Resource Definition med stibaserede URI'er ---
+
+@mcp.resource("/statbank/subjects")
+def subjects_resource() -> dict:
+    """Get all subjects from DST API"""
+    return get_subjects()
+
+@mcp.resource("/statbank/subjects/{subject_id}")
+def subject_by_id_resource(subject_id: str) -> dict:
+    """Get a specific subject from DST API"""
+    return get_subjects(subjects=[subject_id])
+
+@mcp.resource("/statbank/tables")
+def tables_resource() -> dict:
+    """Get tables from DST API"""
+    return get_tables()
+
+@mcp.resource("/statbank/tableinfo/{table_id}")
+def tableinfo_resource(table_id: str) -> dict:
+    """Get metadata for a specific table from DST API"""
+    return get_table_info(table_id)
+
+# OBS! Denne resource definition med komplekse parametre i URL-stien er IKKE standard for HTTP.
+# For nem integration med standard HTTP/OpenAI, bør du overveje at ændre denne
+# til en POST-anmodning til f.eks. "/statbank/data/{table_id}" og sende
+# 'variables', 'format', osv. i request body og/eller query parametre.
+# Koden her bruger den definition du havde, men OpenAPI specifikationen vil
+# beskrive det som en standard POST for kompatibilitet.
+@mcp.resource("/statbank/data/{table_id}/{variables}/{format}/{timeOrder}/{lang}/{valuePresentation}")
+def data_resource(table_id: str, variables: list[dict] = None, format: DataFormat = "JSONSTAT",
+                  timeOrder: Optional[Literal["Ascending", "Descending"]] = None,
+                  lang: str = "da",
+                  valuePresentation: Optional[Literal["Code", "Text"]] = None) -> Union[dict, bytes, str]:
+    """Get data from a specific table from DST API"""
+    # Som nævnt, usandsynligt at 'variables' og andre komplekse/enum parametre
+    # parses korrekt fra URL-stien af et standard HTTP framework/Uvicorn.
+    # Den underliggende get_data funktion er dog intakt.
+    logger.warning("Data resource called. Parameter parsing from non-standard URL path might not work as expected via HTTP.")
+    return get_data(table_id=table_id, variables=variables, format=format,
+                    timeOrder=timeOrder, lang=lang, valuePresentation=valuePresentation)
+
+
+# Resource/Tool definition for get_statistics hvis relevant
+# Typisk som et tool, da det potentielt laver et eksternt kald.
+# @mcp.tool("/statbank/statistics/{dataset}") # Eksempel på Tool med sti
+# async def statistics_tool(dataset: str) -> str:
+#     """Get statistics for a specific dataset"""
+#     return await get_statistics(dataset) # Kalder den underliggende async funktion
+
+
+# Fjern hele if __name__ == "__main__": blokken
+# da serveren startes af Uvicorn på Render via Start Command
 # if __name__ == "__main__":
-#     try:
-#         logger.info("Starting Danmarks Statistik API Server...")
-#         # Læs den dynamiske PORT miljøvariabel sat af Render.
-#         render_port = int(os.environ.get("PORT", 8000))
-#         logger.info(f"Render assigned port: {render_port}. FastMCP will need to bind correctly.")
-#
-#         # Kald mcp.run uden 'host', 'port' og 'log_level'.
-#         # Dette er kun til STDIO transport ifølge dokumentationen, ikke netværksserver.
-#         mcp.run(transport='sse') # Denne linje skal fjernes ved deployering på Render
-#
-#     except Exception as e:
-#         logger.error(f"An error occurred during server startup: {e}")
-#         sys.exit(1)
+#    ... Fjernet ...
