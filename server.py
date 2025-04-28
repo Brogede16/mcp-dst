@@ -1,9 +1,9 @@
 from typing import Any, Literal, Optional, Union, Dict, get_args
+from fastapi import FastAPI, Body
 from mcp.server.fastmcp import FastMCP
 import sys
 import logging
 import requests
-# import os # Ikke nødvendigt at importere os her
 
 # Set up logging
 logging.basicConfig(
@@ -13,32 +13,26 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Initialize FastMCP server - This instance is the ASGI app callable via .sse_app()
+# Initialize FastAPI app and FastMCP server
+app = FastAPI()
 mcp = FastMCP("Danmarks Statistik API")
 
+# Mount MCP's SSE app under /sse
+app.mount("/sse", mcp.sse_app())
+
 # Base URL for DST API
-BASE_URL = "https://api.statbank.dk/v1" # Korrekt URL
+BASE_URL = "https://api.statbank.dk/v1"
 
-# Define valid formats as a literal type
-DataFormat = Literal["JSONSTAT", "JSON", "CSV", "XLSX", "BULK", "PX", "TSV", "HTML5", "HTML5InclNotes", "SDMXCOMPACT", "SDMXGENERIC"]
+# Define valid formats
+DataFormat = Literal[
+    "JSONSTAT", "JSON", "CSV", "XLSX", "BULK", "PX", "TSV",
+    "HTML5", "HTML5InclNotes", "SDMXCOMPACT", "SDMXGENERIC"
+]
 
-# --- Tool Funktioner (Inkluderet som ønsket) ---
+# --- Funktioner (fælles til tools og REST endpoints) ---
 
-@mcp.tool()
 def get_subjects(subjects: list[str] = None, includeTables: bool = False, recursive: bool = False,
                  omitInactiveSubjects: bool = False, lang: str = "da") -> dict:
-    """Get subjects from DST API
-
-    Args:
-        subjects: Optional list of subject codes. If provided, fetches sub-subjects for these subjects.
-        includeTables: If True, includes tables in the result under each subject.
-        recursive: If True, fetches sub-subjects (and tables) recursively through all levels.
-        omitInactiveSubjects: If True, omits subjects/sub-subjects that are no longer updated.
-        lang: Language code ("da" or "en", default "da").
-
-    Returns:
-        A dictionary containing the subjects hierarchy in JSON format.
-    """
     url = f"{BASE_URL}/subjects"
     payload = {"format": "JSON", "lang": lang}
     if subjects:
@@ -50,28 +44,11 @@ def get_subjects(subjects: list[str] = None, includeTables: bool = False, recurs
     if omitInactiveSubjects:
         payload["omitInactiveSubjects"] = True
 
-    try:
-        r = requests.post(url, json=payload)
-        r.raise_for_status()
-        return r.json()
-    except requests.exceptions.RequestException as e:
-        logger.error(f"Request error in get_subjects: {e}")
-        raise
+    r = requests.post(url, json=payload)
+    r.raise_for_status()
+    return r.json()
 
-
-@mcp.tool()
 def get_tables(subjects: list[str] = None, pastdays: int = None, includeInactive: bool = False, lang: str = "da") -> dict:
-    """Get tables from DST API
-
-    Args:
-        subjects: Optional list of subject codes to filter tables on.
-        pastdays: Optional number of days; only tables updated within these days are included.
-        includeInactive: If True, includes inactive (discontinued) tables.
-        lang: Language code ("da" or "en", default "da").
-
-    Returns:
-        A dictionary containing the list of tables in JSON format.
-    """
     url = f"{BASE_URL}/tables"
     payload = {"format": "JSON", "lang": lang}
     if subjects:
@@ -81,206 +58,98 @@ def get_tables(subjects: list[str] = None, pastdays: int = None, includeInactive
     if includeInactive:
         payload["includeInactive"] = True
 
-    try:
-        r = requests.post(url, json=payload)
-        r.raise_for_status()
-        return r.json()
-    except requests.exceptions.RequestException as e:
-        logger.error(f"Request error in get_tables: {e}")
-        raise
+    r = requests.post(url, json=payload)
+    r.raise_for_status()
+    return r.json()
 
-
-@mcp.tool()
 def get_table_info(table_id: str, lang: str = "da") -> dict:
-    """Get table metadata from DST API
-
-    Args:
-        table_id: The table code (e.g., "folk1c").
-        lang: Language code ("da" or "en", default "da").
-
-    Returns:
-        A dictionary containing metadata for the table (variables, value codes, etc.).
-    """
     url = f"{BASE_URL}/tableinfo"
     payload = {"table": table_id, "format": "JSON", "lang": lang}
 
-    try:
-        r = requests.post(url, json=payload)
-        r.raise_for_status()
-        return r.json()
-    except requests.exceptions.RequestException as e:
-        logger.error(f"Request error in get_table_info: {e}")
-        raise
+    r = requests.post(url, json=payload)
+    r.raise_for_status()
+    return r.json()
 
-@mcp.tool()
 def get_data(table_id: str, variables: list[dict] = None, format: DataFormat = "JSONSTAT",
              timeOrder: Optional[Literal["Ascending", "Descending"]] = None,
              lang: str = "da",
              valuePresentation: Optional[Literal["Code", "Text"]] = None) -> Union[dict, bytes, str]:
-    """Get data from DST API
-
-    Args:
-        table_id: The table code (e.g., "folk1c").
-        variables: Optional list of dicts to filter data. Each dict must have "code" (variable code)
-                   and "values" (list of desired value codes). If None or empty, fetches data for all
-                   values (with automatic elimination of variables).
-        format: Output format. Default "JSONSTAT". Valid formats are: JSONSTAT, JSON, CSV, XLSX, BULK, PX, TSV, HTML5, HTML5InclNotes, SDMXCOMPACT, SDMXGENERIC
-        timeOrder: Optional string for sorting time series ("Ascending" or "Descending").
-        lang: Language code for metadata in result ("da" or "en", default "da").
-        valuePresentation: Optional string to control value presentation ("Code" or "Text").
-
-    Returns:
-        Data in the requested format. For JSON formats returns a dict, for other formats returns raw bytes or text.
-    """
     url = f"{BASE_URL}/data"
-
-    # Validate and normalize format
     valid_formats = [arg.upper() for arg in get_args(DataFormat)]
     format_upper = format.upper()
     if format_upper not in valid_formats:
-         raise ValueError(f"Invalid format: {format}. Valid formats are: {', '.join(valid_formats)}")
+        raise ValueError(f"Invalid format: {format}. Valid formats are: {', '.join(valid_formats)}")
 
-    # Build the basic payload
     payload = {
         "table": table_id,
         "format": format_upper,
-        "lang": lang
+        "lang": lang,
+        "variables": variables or []
     }
 
-    # Handle variables - ensure proper structure
-    if variables is not None and len(variables) > 0:
-        processed_variables = []
-        for var in variables:
-            if not isinstance(var, dict) or "code" not in var or "values" not in var:
-                 raise ValueError(f"Invalid variable structure: {var}. Each variable must be a dict with 'code' and 'values' keys")
-
-            values = var.get("values")
-            if values is None:
-                 raise ValueError(f"Variable '{var.get('code', 'unknown')}' has no 'values' key or 'values' is None")
-
-            if not isinstance(values, list):
-                 processed_values = [values]
-            else:
-                 processed_variables = values
-
-            processed_variables.append({"code": var["code"], "values": processed_variables})
-
-        payload["variables"] = processed_variables
-    else:
-         # If variables is None or empty list, send an empty list in the payload
-         payload["variables"] = []
-
-
-    # Add optional parameters if provided
     if timeOrder:
         payload["timeOrder"] = timeOrder
     if valuePresentation:
         payload["valuePresentation"] = valuePresentation
 
-    # Make the request
-    try:
-        if format_upper in ["BULK", "SDMXCOMPACT", "SDMXGENERIC"]:
-             r = requests.post(url, json=payload, stream=True)
-        else:
-            r = requests.post(url, json=payload)
+    r = requests.post(url, json=payload, stream=(format_upper in ["BULK", "SDMXCOMPACT", "SDMXGENERIC"]))
+    r.raise_for_status()
 
-        r.raise_for_status()
+    if format_upper in ["JSON", "JSONSTAT"]:
+        return r.json()
+    elif format_upper in ["CSV", "PX", "TSV", "HTML5", "HTML5InclNotes"]:
+        return r.text
+    else:
+        return r.content
 
-        # Handle different response formats
-        if format_upper in ["JSON", "JSONSTAT"]:
-            return r.json()
-        elif format_upper in ["CSV", "PX", "TSV", "HTML5", "HTML5InclNotes"]:
-            return r.text
-        else:
-            return r.content
+# --- REST API Endpoints (til ChatGPT Actions) ---
 
-    except requests.exceptions.HTTPError as e:
-        logger.error(f"HTTP error occurred: {e.response.status_code} - {e}")
-        try:
-            error_detail = r.json()
-            logger.error(f"API Error Details: {error_detail}")
-            raise ValueError(f"API request failed: {error_detail}") from e
-        except requests.exceptions.JSONDecodeError:
-            logger.error("Could not decode error response as JSON.")
-            raise ValueError(f"API request failed with status {r.status_code} and could not parse error details.") from e
-        except Exception as parse_e:
-             logger.error(f"An unexpected error occurred while processing API error response: {parse_e}")
-             raise ValueError(f"API request failed with status {r.status_code} and an unexpected error occurred during error processing.") from parse_e
-    except requests.exceptions.RequestException as e:
-        logger.error(f"Request Exception occurred: {e}")
-        raise ValueError(f"API request failed due to network or other request error: {e}") from e
-    except Exception as e:
-        logger.error(f"An unexpected error occurred while fetching data: {e}")
-        raise
+@app.post("/statbank/subjects")
+def subjects_rest(includeTables: bool = False, recursive: bool = False,
+                  omitInactiveSubjects: bool = False, lang: str = "da"):
+    return get_subjects(includeTables=includeTables, recursive=recursive,
+                        omitInactiveSubjects=omitInactiveSubjects, lang=lang)
 
+@app.post("/statbank/subjects/{subject_id}")
+def subject_by_id_rest(subject_id: str, includeTables: bool = False, recursive: bool = False,
+                       omitInactiveSubjects: bool = False, lang: str = "da"):
+    return get_subjects(subjects=[subject_id], includeTables=includeTables,
+                        recursive=recursive, omitInactiveSubjects=omitInactiveSubjects, lang=lang)
+
+@app.post("/statbank/tables")
+def tables_rest(includeInactive: bool = False, lang: str = "da"):
+    return get_tables(includeInactive=includeInactive, lang=lang)
+
+@app.post("/statbank/tableinfo/{table_id}")
+def tableinfo_rest(table_id: str, lang: str = "da"):
+    return get_table_info(table_id=table_id, lang=lang)
+
+@app.post("/statbank/data/{table_id}")
+def data_rest(table_id: str,
+              variables: list[dict] = Body(default=[]),
+              format: DataFormat = "JSONSTAT",
+              timeOrder: Optional[str] = None,
+              lang: str = "da",
+              valuePresentation: Optional[str] = None):
+    return get_data(table_id=table_id, variables=variables,
+                    format=format, timeOrder=timeOrder,
+                    lang=lang, valuePresentation=valuePresentation)
+
+# --- MCP Tools (valgfrit, hvis du vil have dem aktivt i MCP-verdenen også) ---
 
 @mcp.tool()
-async def get_statistics(dataset: str) -> str:
-    """Get statistics for a specific dataset from Danmarks Statistik.
+def get_subjects_tool(**kwargs):
+    return get_subjects(**kwargs)
 
-    Args:
-        dataset: The ID of the dataset to query
-    """
-    logger.debug(f"Fetching statistics for dataset: {dataset}")
-    # Example using httpx for async HTTP calls (requires httpx installed)
-    # import httpx
-    # async with httpx.AsyncClient() as client:
-    #     response = await client.get(f"{BASE_URL}/some_async_endpoint/{dataset}") # Replace with actual endpoint
-    #     response.raise_for_status()
-    #     return response.text
-    # Currently returns a placeholder string
-    return f"Statistics for dataset {dataset} (Placeholder - Actual API call needed)"
+@mcp.tool()
+def get_tables_tool(**kwargs):
+    return get_tables(**kwargs)
 
+@mcp.tool()
+def get_table_info_tool(**kwargs):
+    return get_table_info(**kwargs)
 
-# --- Resource/Tool Definition med Scheme-baserede URI'er (KRÆVET af FastMCP) ---
+@mcp.tool()
+def get_data_tool(**kwargs):
+    return get_data(**kwargs)
 
-# Brug et scheme (statbank://) for at tilfredsstille Pydantic/FastMCP validering ved load.
-# FastMCP's sse_app skal så mappe stien (/statbank/...) til HTTP paths.
-
-@mcp.resource("statbank://statbank/subjects")
-def subjects_resource() -> dict:
-    """Get all subjects from DST API"""
-    return get_subjects() # Kalder den underliggende tool funktion
-
-@mcp.resource("statbank://statbank/subjects/{subject_id}")
-def subject_by_id_resource(subject_id: str) -> dict:
-    """Get a specific subject from DST API"""
-    return get_subjects(subjects=[subject_id]) # Kalder den underliggende tool funktion
-
-@mcp.resource("statbank://statbank/tables")
-def tables_resource() -> dict:
-    """Get tables from DST API"""
-    return get_tables() # Kalder den underliggende tool funktion
-
-@mcp.resource("statbank://statbank/tableinfo/{table_id}")
-def tableinfo_resource(table_id: str) -> dict:
-    """Get metadata for a specific table from DST API"""
-    return get_table_info(table_id) # Kalder den underliggende tool funktion
-
-# --- data_resource som et TOOL med Scheme-baseret URI og standard POST-sti ---
-# Vi beholder den som @mcp.tool og med path'en /statbank/data/{table_id}
-# og tilføjer scheme'et for at løse ValidationError.
-@mcp.tool("statbank://statbank/data/{table_id}")
-def data_resource(table_id: str, variables: list[dict] = None, format: DataFormat = "JSONSTAT",
-                  timeOrder: Optional[Literal["Ascending", "Descending"]] = None,
-                  lang: str = "da",
-                  valuePresentation: Optional[Literal["Code", "Text"]] = None) -> Union[dict, bytes, str]:
-    """Get data from a specific table from DST API"""
-    # Funktionen forbliver den samme, den modtager argumenterne fra HTTP requesten
-    # via FastMCP/Uvicorn routing, som nu sker korrekt for POST til denne sti.
-    logger.info(f"Data resource tool called for table {table_id}. Format: {format}, Variables: {variables}")
-    return get_data(table_id=table_id, variables=variables, format=format,
-                    timeOrder=timeOrder, lang=lang, valuePresentation=valuePresentation)
-
-
-# Resource/Tool definition for get_statistics hvis relevant
-# @mcp.tool("statbank://statbank/statistics/{dataset}") # Eksempel på Tool med scheme-baseret sti
-# async def statistics_tool(dataset: str) -> str:
-#     """Get statistics for a specific dataset"""
-#     return await get_statistics(dataset) # Kalder den underliggende async funktion
-
-
-# Fjern hele if __name__ == "__main__": blokken
-# da serveren startes af Uvicorn på Render via Start Command
-# if __name__ == "__main__":
-#    ... Fjernet ...
